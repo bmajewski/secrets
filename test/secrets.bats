@@ -73,7 +73,7 @@ load test_helper
 
   run "$SECRETS_BIN" push testproj
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No .env"* ]]
+  [[ "$output" == *"No secret files"* ]]
 }
 
 @test "push errors with missing key" {
@@ -103,6 +103,44 @@ load test_helper
   # Push again — age produces different ciphertext each time, so this creates a new commit
   run "$SECRETS_BIN" push testproj
   [ "$status" -eq 0 ]
+}
+
+@test "push encrypts .dev.vars files" {
+  init_with_remote
+  create_project_dir testproj
+  echo "CF_SECRET=wrangler123" > "$WORK_DIR/testproj/.dev.vars"
+
+  run "$SECRETS_BIN" push testproj
+  [ "$status" -eq 0 ]
+  [ -f "$SECRETS_DIR/testproj/.env.age" ]
+  [ -f "$SECRETS_DIR/testproj/.dev.vars.age" ]
+}
+
+@test "pull decrypts .dev.vars files" {
+  init_with_remote
+  create_project_dir testproj
+  echo "CF_SECRET=wrangler123" > "$WORK_DIR/testproj/.dev.vars"
+  "$SECRETS_BIN" push testproj >/dev/null 2>&1
+
+  local pull_dir="$WORK_DIR/pull-devvars"
+  mkdir -p "$pull_dir"
+  cd "$pull_dir"
+
+  run "$SECRETS_BIN" pull testproj
+  [ "$status" -eq 0 ]
+  [ "$(cat "$pull_dir/.dev.vars")" = "CF_SECRET=wrangler123" ]
+}
+
+@test "pre-commit blocks plaintext .dev.vars files" {
+  init_with_remote
+  cd "$SECRETS_DIR"
+
+  echo "LEAKED=true" > .dev.vars
+  git add -f .dev.vars
+
+  run git commit -m "should fail"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Plaintext"* ]]
 }
 
 # ─── pull ──────────────────────────────────────────────────────────────
@@ -252,6 +290,137 @@ load test_helper
   [ "$status" -eq 0 ]
 }
 
+# ─── clear ─────────────────────────────────────────────────────────────
+
+@test "clear removes plaintext secret files" {
+  init_with_remote
+  create_project_dir testproj
+  echo "CF_SECRET=wrangler123" > "$WORK_DIR/testproj/.dev.vars"
+
+  # Verify files exist
+  [ -f "$WORK_DIR/testproj/.env" ]
+  [ -f "$WORK_DIR/testproj/.env.staging" ]
+  [ -f "$WORK_DIR/testproj/.dev.vars" ]
+
+  run "$SECRETS_BIN" clear
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Cleared 3"* ]]
+
+  # Files should be gone
+  [ ! -f "$WORK_DIR/testproj/.env" ]
+  [ ! -f "$WORK_DIR/testproj/.env.staging" ]
+  [ ! -f "$WORK_DIR/testproj/.dev.vars" ]
+}
+
+@test "clear does nothing when no secret files exist" {
+  mkdir -p "$WORK_DIR/empty"
+  cd "$WORK_DIR/empty"
+
+  run "$SECRETS_BIN" clear
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No secret files"* ]]
+}
+
+@test "clear does not remove non-secret files" {
+  mkdir -p "$WORK_DIR/mixed"
+  cd "$WORK_DIR/mixed"
+  echo "SECRET=yes" > .env
+  echo "config" > .envrc
+  echo "other" > app.js
+
+  run "$SECRETS_BIN" clear
+  [ "$status" -eq 0 ]
+  [ ! -f "$WORK_DIR/mixed/.env" ]
+  [ -f "$WORK_DIR/mixed/.envrc" ]
+  [ -f "$WORK_DIR/mixed/app.js" ]
+}
+
+@test "clear --workspaces removes secrets from all workspaces" {
+  local mono
+  mono=$(create_monorepo)
+  cd "$mono"
+
+  # Verify files exist
+  [ -f "$mono/.env" ]
+  [ -f "$mono/apps/web/.env.staging" ]
+  [ -f "$mono/apps/api/.env" ]
+
+  run "$SECRETS_BIN" clear --workspaces
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Cleared"* ]]
+
+  # All should be gone
+  [ ! -f "$mono/.env" ]
+  [ ! -f "$mono/apps/web/.env.staging" ]
+  [ ! -f "$mono/apps/api/.env" ]
+}
+
+# ─── run ───────────────────────────────────────────────────────────────
+
+@test "run pulls secrets, runs command, then clears" {
+  init_with_remote
+  create_project_dir testproj
+  "$SECRETS_BIN" push testproj >/dev/null 2>&1
+
+  # Remove plaintext files
+  rm "$WORK_DIR/testproj/.env" "$WORK_DIR/testproj/.env.staging"
+
+  # Run a command that reads the secret
+  run "$SECRETS_BIN" run cat .env
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SECRET_KEY=abc123"* ]]
+
+  # After run completes, plaintext files should be cleared
+  [ ! -f "$WORK_DIR/testproj/.env" ]
+  [ ! -f "$WORK_DIR/testproj/.env.staging" ]
+}
+
+@test "run clears secrets even if command fails" {
+  init_with_remote
+  create_project_dir testproj
+  "$SECRETS_BIN" push testproj >/dev/null 2>&1
+
+  # Remove plaintext files
+  rm "$WORK_DIR/testproj/.env" "$WORK_DIR/testproj/.env.staging"
+
+  # Run a command that will fail (set +e so bats captures it)
+  run "$SECRETS_BIN" run false
+  [ "$status" -ne 0 ]
+
+  # Secrets should still be cleared
+  [ ! -f "$WORK_DIR/testproj/.env" ]
+  [ ! -f "$WORK_DIR/testproj/.env.staging" ]
+}
+
+@test "run errors with no command" {
+  run "$SECRETS_BIN" run
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Usage"* ]]
+}
+
+@test "run passes arguments through to command" {
+  init_with_remote
+  create_project_dir testproj
+  "$SECRETS_BIN" push testproj >/dev/null 2>&1
+  rm "$WORK_DIR/testproj/.env" "$WORK_DIR/testproj/.env.staging"
+
+  # Run with multiple args
+  run "$SECRETS_BIN" run ls -la .env
+  [ "$status" -eq 0 ]
+  [[ "$output" == *".env"* ]]
+}
+
+@test "run supports -- separator" {
+  init_with_remote
+  create_project_dir testproj
+  "$SECRETS_BIN" push testproj >/dev/null 2>&1
+  rm "$WORK_DIR/testproj/.env" "$WORK_DIR/testproj/.env.staging"
+
+  run "$SECRETS_BIN" run -- cat .env
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SECRET_KEY=abc123"* ]]
+}
+
 # ─── workspaces ────────────────────────────────────────────────────────
 
 # Helper: create a monorepo with package.json workspaces
@@ -348,5 +517,5 @@ EOF
 
   run "$SECRETS_BIN" push --workspaces
   [ "$status" -eq 1 ]
-  [[ "$output" == *"No .env files"* ]]
+  [[ "$output" == *"No secret files"* ]]
 }

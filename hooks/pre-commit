@@ -3,9 +3,9 @@
 # Rejects staged files matching .env patterns without .age extension.
 # This is a safety net, not a security boundary (--no-verify bypasses it).
 
-BLOCKED=$(git diff --cached --name-only | grep -E '\.env' | grep -v '\.age$' || true)
+BLOCKED=$(git diff --cached --name-only | grep -E '\.(env|dev\.vars)' | grep -v '\.age$' || true)
 if [ -n "$BLOCKED" ]; then
-  echo "ERROR: Plaintext env files staged for commit:"
+  echo "ERROR: Plaintext secret files staged for commit:"
   echo "$BLOCKED"
   echo "Only .age (encrypted) files should be committed."
   exit 1

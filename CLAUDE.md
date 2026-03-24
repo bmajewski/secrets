@@ -25,9 +25,9 @@ Single bash script (`secrets`) with subcommands: init, push, pull, list, rm, rek
 
 - Encryption: `age` with key files (not passphrases — age passphrases are non-scriptable)
 - Storage: Private git repo at `~/.secrets/`
-- Convention: Globs `.env` and `.env.*` (not `.envrc`, `.environment-*`)
+- Convention: Tracks `.env`, `.env.*`, and `.dev.vars` (not `.envrc`, `.environment-*`)
 - Workspaces: `--workspaces` flag reads `package.json` workspaces, requires `jq`
-- Safety: Pre-commit hook rejects plaintext `.env` files
+- Safety: Pre-commit hook rejects plaintext secret files
 
 ## Project Structure
 
