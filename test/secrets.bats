@@ -251,3 +251,102 @@ load test_helper
   run git commit -m "should succeed"
   [ "$status" -eq 0 ]
 }
+
+# ─── workspaces ────────────────────────────────────────────────────────
+
+# Helper: create a monorepo with package.json workspaces
+create_monorepo() {
+  local dir="$WORK_DIR/myapp"
+  mkdir -p "$dir/apps/web" "$dir/apps/api" "$dir/packages/auth"
+
+  cat > "$dir/package.json" << 'PKGJSON'
+{
+  "name": "myapp",
+  "workspaces": ["apps/*", "packages/*"]
+}
+PKGJSON
+
+  # Root env
+  echo "ROOT_SECRET=top" > "$dir/.env"
+  # Workspace envs
+  echo "WEB_DB=webdb" > "$dir/apps/web/.env.staging"
+  echo "API_KEY=abc" > "$dir/apps/api/.env"
+  # packages/auth has no .env — should be skipped silently
+
+  # Init a git repo so derive_project_name can use dirname
+  git init "$dir" >/dev/null 2>&1
+  echo "$dir"
+}
+
+@test "push --workspaces encrypts root and workspace env files" {
+  init_with_remote
+  local mono
+  mono=$(create_monorepo)
+  cd "$mono"
+
+  run "$SECRETS_BIN" push --workspaces
+  [ "$status" -eq 0 ]
+
+  # Root env
+  [ -f "$SECRETS_DIR/myapp/.env.age" ]
+  # Workspace envs
+  [ -f "$SECRETS_DIR/myapp/apps/web/.env.staging.age" ]
+  [ -f "$SECRETS_DIR/myapp/apps/api/.env.age" ]
+  # packages/auth should NOT have a dir (no .env files)
+  [ ! -d "$SECRETS_DIR/myapp/packages/auth" ]
+}
+
+@test "pull --workspaces decrypts into correct directories" {
+  init_with_remote
+  local mono
+  mono=$(create_monorepo)
+  cd "$mono"
+  "$SECRETS_BIN" push --workspaces >/dev/null 2>&1
+
+  # Remove the original env files
+  rm "$mono/.env" "$mono/apps/web/.env.staging" "$mono/apps/api/.env"
+
+  run "$SECRETS_BIN" pull --workspaces
+  [ "$status" -eq 0 ]
+
+  # Verify decrypted into correct locations
+  [ "$(cat "$mono/.env")" = "ROOT_SECRET=top" ]
+  [ "$(cat "$mono/apps/web/.env.staging")" = "WEB_DB=webdb" ]
+  [ "$(cat "$mono/apps/api/.env")" = "API_KEY=abc" ]
+}
+
+@test "push --workspaces errors without package.json" {
+  init_with_remote
+  mkdir -p "$WORK_DIR/nopkg"
+  cd "$WORK_DIR/nopkg"
+
+  run "$SECRETS_BIN" push --workspaces
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No package.json"* ]]
+}
+
+@test "push --workspaces errors without workspaces field" {
+  init_with_remote
+  mkdir -p "$WORK_DIR/nows"
+  echo '{"name": "nows"}' > "$WORK_DIR/nows/package.json"
+  cd "$WORK_DIR/nows"
+
+  run "$SECRETS_BIN" push --workspaces
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No workspaces"* ]]
+}
+
+@test "push --workspaces errors when no env files anywhere" {
+  init_with_remote
+  local dir="$WORK_DIR/empty-mono"
+  mkdir -p "$dir/apps/web" "$dir/packages/lib"
+  cat > "$dir/package.json" << 'EOF'
+{"workspaces": ["apps/*", "packages/*"]}
+EOF
+  git init "$dir" >/dev/null 2>&1
+  cd "$dir"
+
+  run "$SECRETS_BIN" push --workspaces
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No .env files"* ]]
+}

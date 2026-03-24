@@ -26,6 +26,7 @@ Single bash script (`secrets`) with subcommands: init, push, pull, list, rm, rek
 - Encryption: `age` with key files (not passphrases — age passphrases are non-scriptable)
 - Storage: Private git repo at `~/.secrets/`
 - Convention: Globs `.env` and `.env.*` (not `.envrc`, `.environment-*`)
+- Workspaces: `--workspaces` flag reads `package.json` workspaces, requires `jq`
 - Safety: Pre-commit hook rejects plaintext `.env` files
 
 ## Project Structure
@@ -34,7 +35,7 @@ Single bash script (`secrets`) with subcommands: init, push, pull, list, rm, rek
 secrets              # CLI script (~300 lines bash)
 hooks/pre-commit     # Pre-commit hook template
 test/
-  secrets.bats       # bats-core test suite (20 tests)
+  secrets.bats       # bats-core test suite (25 tests)
   test_helper.bash   # Shared setup/teardown
 README.md            # User-facing documentation
 CLAUDE.md            # This file
