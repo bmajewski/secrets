@@ -16,7 +16,7 @@ People end up sharing secrets over Slack, email, or sticky notes. When a key cha
 
 `secrets` encrypts your secret files and stores them in a separate, private git repository. Only someone with the encryption key can read them.
 
-```
+```diagram
 Your project (e.g. ~/myapp/)           Your secrets store (~/.secrets/)
 ┌──────────────────────────┐          ┌──────────────────────────┐
 │ .env          (plaintext)│──encrypt─▶│ myapp/.env.age (encrypted)│──sync──▶ GitHub (private)
@@ -198,7 +198,7 @@ secrets run -w turbo dev    # pull all, run command, clear all on exit
 
 Inside `~/.secrets/`, workspace secrets are organized by path:
 
-```
+```shell
 ~/.secrets/
   myapp/
     .env.age                        # root project secrets
